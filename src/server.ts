@@ -1,32 +1,27 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import {
-    addDummyDbItems,
-    addDbItem,
-    getAllDbItems,
-    getDbItemById,
-    DbItem,
-    updateDbItemById,
-} from "./db";
 import filePath from "./filePath";
-
-// loading in some dummy items into the database
-// (comment out if desired, or change the number)
-addDummyDbItems(20);
+import { Pool } from "pg";
+import userFunctions from "./controllers/user";
 
 const app = express();
-
-/** Parses JSON data in a request automatically */
+// To parse JSON bodies (as sent by API clients)
 app.use(express.json());
-/** To allow 'Cross-Origin Resource Sharing': https://en.wikipedia.org/wiki/Cross-origin_resource_sharing */
+// To allow 'Cross-Origin Resource Sharing': https://en.wikipedia.org/wiki/Cross-origin_resource_sharing
 app.use(cors());
-
-// read in contents of any environment variables in the .env file
-// Must be done BEFORE trying to access process.env...
+// Always make sure this is before you access any environment variables
 dotenv.config();
 
-// use the environment variable PORT, or 4000 as a fallback
+const connectionString = process.env.DB_URL;
+
+const pool = new Pool({
+    connectionString,
+    ssl: {
+        rejectUnauthorized: false,
+    },
+});
+
 const PORT_NUMBER = process.env.PORT ?? 4000;
 
 // API info page
@@ -36,50 +31,30 @@ app.get("/", (req, res) => {
 });
 
 // GET /items
-app.get("/items", (req, res) => {
-    const allSignatures = getAllDbItems();
-    res.status(200).json(allSignatures);
+app.get("/items`", async (req, res) => {
+    //const allSignatures = getAllDbItems();
+    const allSignatures = await pool.query("SELECT * from customers");
+    console.log(allSignatures);
+    res.status(200).json(allSignatures.rows);
+    console.log(allSignatures);
 });
 
-// POST /items
-app.post<{}, {}, DbItem>("/items", (req, res) => {
-    // to be rigorous, ought to handle non-conforming request bodies
-    // ... but omitting this as a simplification
+app.post("/user", async (req, res) => {
     const postData = req.body;
-    const createdSignature = addDbItem(postData);
-    res.status(201).json(createdSignature);
-});
-
-// GET /items/:id
-app.get<{ id: string }>("/items/:id", (req, res) => {
-    const matchingSignature = getDbItemById(parseInt(req.params.id));
-    if (matchingSignature === "not found") {
-        res.status(404).json(matchingSignature);
-    } else {
-        res.status(200).json(matchingSignature);
-    }
-});
-
-// DELETE /items/:id
-app.delete<{ id: string }>("/items/:id", (req, res) => {
-    const matchingSignature = getDbItemById(parseInt(req.params.id));
-    if (matchingSignature === "not found") {
-        res.status(404).json(matchingSignature);
-    } else {
-        res.status(200).json(matchingSignature);
-    }
-});
-
-// PATCH /items/:id
-app.patch<{ id: string }, {}, Partial<DbItem>>("/items/:id", (req, res) => {
-    const matchingSignature = updateDbItemById(
-        parseInt(req.params.id),
-        req.body
+    const doesUserExist = await userFunctions.checkExistingUser(
+        postData.email,
+        pool
     );
-    if (matchingSignature === "not found") {
-        res.status(404).json(matchingSignature);
-    } else {
-        res.status(200).json(matchingSignature);
+    if (doesUserExist) {
+        res.status(409).send("User already exists");
+        return;
+    }
+    try {
+        await userFunctions.createUser(postData, pool);
+        res.send("Success: User created");
+    } catch (error) {
+        console.error(error);
+        res.status(500).send("failure");
     }
 });
 
